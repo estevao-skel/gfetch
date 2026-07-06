@@ -1,6 +1,5 @@
 BITS 64
 ORG 0x400000
-
 ehdr:
     db 0x7F, "ELF"
     db 2, 1, 1, 0
@@ -16,9 +15,7 @@ ehdr:
     dw phdrsize
     dw 1
     dw 0, 0, 0
-
 ehdrsize equ $ - ehdr
-
 phdr:
     dd 1
     dd 7
@@ -26,11 +23,9 @@ phdr:
     dq $$
     dq $$
     dq filesize
-    dq filesize + 0x1000
+    dq filesize + bufsz
     dq 0x1000
-
 phdrsize equ $ - phdr
-
 _start:
     mov rsi, [rsp]
     lea rsi, [rsp + rsi*8 + 16]
@@ -45,189 +40,122 @@ _start:
 .found_user:
     add rdi, 5
     mov rsi, rdi
-    xor rdx, rdx
-.user_len:
-    cmp byte [rdi+rdx], 0
-    je .print_user
-    inc rdx
-    jmp .user_len
-.print_user:
-    mov eax, 1
-    mov edi, 1
-    syscall
+    xor edx, edx
+    xor ecx, ecx
+    call putsz
 .no_user:
-    mov eax, 1
-    mov edi, 1
-    lea rsi, [rel hdr]
+    mov esi, hdr
     mov edx, hdr_len
-    syscall
-    
-    mov eax, 2
-    lea rdi, [rel p_os]
-    xor esi, esi
+    call puts
+    mov edi, p_os
+    call openread
+    js .do_kr
+    mov esi, buf + 13
     xor edx, edx
-    syscall
-    test eax, eax
-    js .sk_os
-    
-    push rax
-    xor eax, eax
-    pop rdi
-    lea rsi, [rel buf]
-    mov edx, 512
-    syscall
-    
-    push rax
-    mov eax, 3
-    pop rdx
-    syscall
-    
-    lea rdi, [rel buf]
-    mov ecx, edx
-.lp_os:
-    cmp byte [rdi], 'P'
-    jne .nx_os
-    cmp dword [rdi+1], 0x54544552
-    je .fd_os
-.nx_os:
-    inc rdi
-    loop .lp_os
-    jmp .sk_os
-.fd_os:
-    add rdi, 13
-    cmp byte [rdi], '"'
-    jne .pr_os
-    inc rdi
-.pr_os:
-    mov rsi, rdi
-    xor edx, edx
-.ct_os:
-    mov al, [rdi]
-    cmp al, '"'
-    je .wr_os
-    cmp al, 10
-    je .wr_os
-    inc rdi
-    inc edx
-    jmp .ct_os
-.wr_os:
-    mov eax, 1
-    mov edi, 1
-    syscall
-    jmp .do_kr
-.sk_os:
-    mov eax, 1
-    mov edi, 1
-    lea rsi, [rel s_na]
-    mov edx, 3
-    syscall
-
+    mov cl, '"'
+    call putsz
 .do_kr:
-    mov eax, 1
-    mov edi, 1
-    lea rsi, [rel l_kr]
+    mov esi, l_kr
     mov edx, l_kr_len
-    syscall
-    
+    call puts
     mov eax, 63
-    lea rdi, [rel buf]
+    mov edi, buf
     syscall
-    
-    lea rsi, [rel buf + 130]
-    mov rdi, rsi
-    xor rdx, rdx
-.ln_kr:
-    cmp byte [rdi + rdx], 0
-    je .pr_kr
-    inc rdx
-    jmp .ln_kr
-.pr_kr:
-    mov eax, 1
-    mov edi, 1
-    syscall
-    
-    mov eax, 1
-    mov edi, 1
-    lea rsi, [rel l_up]
-    mov edx, l_up_len
-    syscall
-    
-    mov eax, 2
-    lea rdi, [rel p_up]
-    xor esi, esi
+    mov esi, buf + 130
     xor edx, edx
-    syscall
-    test eax, eax
-    js .sk_up
-    
-    push rax
-    xor eax, eax
-    pop rdi
-    lea rsi, [rel buf]
-    mov edx, 32
-    syscall
-    
-    mov eax, 3
-    syscall
-    
-    lea rdi, [rel buf]
-    xor eax, eax
-.ps_up:
-    movzx ecx, byte [rdi]
+    xor ecx, ecx
+    call putsz
+    mov esi, l_ram
+    mov edx, l_ram_len
+    call puts
+    mov edi, p_mem
+    call openread
+    jle .fin
+    mov edi, buf + 9
+    call skip_sp
+    call atoi_kb
+    mov ebx, eax
+    mov edi, buf
+    mov ecx, bufsz - 4
+.fnd_av:
+    cmp dword [rdi], 0x41 << 24 | 'm' << 16 | 'e' << 8 | 'M'
+    je .got_av
     inc rdi
-    cmp cl, '.'
-    je .cv_up
-    sub cl, '0'
-    lea eax, [rax + rax*4]
-    lea eax, [rax + rax + rcx]
-    jmp .ps_up
-.cv_up:
-    xor edx, edx
-    mov ecx, 3600
-    div ecx
-    push rax
-    mov eax, edx
-    xor edx, edx
-    mov ecx, 60
-    div ecx
-    
-    mov r8d, eax
-    pop rax
-    
-    lea rdi, [rel buf]
+    loop .fnd_av
+    jmp .fin
+.got_av:
+    add rdi, 13
+    call skip_sp
+    call atoi_kb
+    sub ebx, eax
+    mov eax, ebx
+    sar eax, 10
+    mov edi, buf
     call itoa
-    mov word [rdi], 0x2068
+    mov word [rdi], 0x424d
     add rdi, 2
-    mov eax, r8d
-    call itoa
-    mov byte [rdi], 'm'
-    inc rdi
-    
-    lea rsi, [rel buf]
+    mov esi, buf
     sub rdi, rsi
-    mov rdx, rdi
-    mov eax, 1
-    mov edi, 1
-    syscall
-    jmp .do_sh
-.sk_up:
-    mov eax, 1
-    mov edi, 1
-    lea rsi, [rel s_na]
-    mov edx, 3
-    syscall
-
-.do_sh:
-    mov eax, 1
-    mov edi, 1
-    lea rsi, [rel ftr]
-    mov edx, ftr_len
-    syscall
-    
+    mov edx, edi
+    call puts
+.fin:
+    mov esi, hdr
+    mov edx, 1
+    call puts
     xor edi, edi
     mov eax, 60
     syscall
-
+openread:
+    push rdi
+    mov eax, 2
+    xor esi, esi
+    xor edx, edx
+    syscall
+    test eax, eax
+    js .err
+    mov edi, eax
+    xor eax, eax
+    mov esi, buf
+    mov edx, bufsz
+    syscall
+    test eax, eax
+.err:
+    pop rdi
+    ret
+putsz:
+.f:
+    cmp byte [rsi + rdx], cl
+    je puts
+    inc edx
+    jmp .f
+puts:
+    mov eax, 1
+    mov edi, 1
+    syscall
+    ret
+skip_sp:
+    cmp byte [rdi], ' '
+    jne .done
+    inc rdi
+    jmp skip_sp
+.done:
+    ret
+atoi_kb:
+    xor eax, eax
+    xor ecx, ecx
+.lp:
+    mov cl, [rdi]
+    cmp cl, '0'
+    jb .done
+    cmp cl, '9'
+    ja .done
+    sub cl, '0'
+    imul eax, eax, 10
+    add eax, ecx
+    inc rdi
+    jmp .lp
+.done:
+    ret
 itoa:
     mov ecx, 10
     xor r9d, r9d
@@ -246,31 +174,19 @@ itoa:
     dec r9d
     jnz .wr
     ret
-
 hdr:
     db 10, 10, 'OS: '
 hdr_len equ $ - hdr
-
 l_kr:
     db 10, 'KR: '
 l_kr_len equ $ - l_kr
-
-l_up:
-    db 10, 'UP: '
-l_up_len equ $ - l_up
-
-ftr:
-    db 10, 'SH: bash', 10
-ftr_len equ $ - ftr
-
-s_na:
-    db 'N/A'
-
+l_ram:
+    db 10, 'RAM: '
+l_ram_len equ $ - l_ram
 p_os:
     db '/etc/os-release', 0
-p_up:
-    db '/proc/uptime', 0
-
+p_mem:
+    db '/proc/meminfo', 0
+bufsz equ 160
 buf:
-
 filesize equ $ - $$
